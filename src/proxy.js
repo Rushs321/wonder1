@@ -56,6 +56,7 @@ export async function processRequest(request, reply) {
                 'x-forwarded-for': randomIP,
                 'via': randomVia(),
             },
+            timeout: 10000,
             maxRedirections: 4
         });
 
