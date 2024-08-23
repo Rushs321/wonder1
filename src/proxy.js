@@ -1,6 +1,6 @@
 
 //import { pick } from 'lodash-es';
-import { undici } from 'undici';
+import undici from 'undici';
 import lodash from 'lodash';
 import { generateRandomIP, randomUserAgent } from './utils.js';
 import { copyHeaders } from './copyHeaders.js';
