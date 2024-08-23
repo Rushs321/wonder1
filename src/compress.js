@@ -3,7 +3,7 @@ import { redirect } from './redirect.js';
 
 const sharpStream = () => sharp({ animated: !process.env.NO_ANIMATE, unlimited: true });
 
-export async function compressImg(request, reply, input) {
+export async function compress(request, reply, input) {
   const format = request.params.webp ? 'webp' : 'jpeg';
 
   input.pipe(
