@@ -1,11 +1,10 @@
-import fetch from 'node-fetch';
-import lodash from 'lodash'; // Import lodash as the default import
+import undici from 'undici';
+import lodash from 'lodash';
 import { generateRandomIP, randomUserAgent } from './utils.js';
-import { copyHeaders as copyHdrs } from './copyHeaders.js';
-import { compressImg as applyCompression } from './compress.js';
-import { bypass as performBypass } from './bypass.js';
-import { redirect as handleRedirect } from './redirect.js';
-import { shouldCompress as checkCompression } from './shouldCompress.js';
+import {copyHeaders} from './copyHeaders.js';
+import {compressImg} from './compress.js';
+import {redirect} from './redirect.js';
+import {shouldCompress} from './shouldCompress.js';
 
 const viaHeaders = [
     '1.1 example-proxy-service.com (ExampleProxy/1.0)',
@@ -34,7 +33,7 @@ export async function processRequest(request, reply) {
 
         Object.entries(hdrs).forEach(([key, value]) => reply.header(key, value));
         
-        return reply.send(`1we23`);
+        return reply.send('1we23');
     }
 
     const urlList = Array.isArray(url) ? url.join('&url=') : url;
@@ -48,8 +47,9 @@ export async function processRequest(request, reply) {
     const randomIP = generateRandomIP();
     const userAgent = randomUserAgent();
 
+    
     try {
-        const response = await fetch(request.params.url, {
+        const origin = await undici.request(request.params.url, {
             headers: {
                 ...lodash.pick(request.headers, ['cookie', 'dnt', 'referer']),
                 'user-agent': userAgent,
@@ -57,27 +57,51 @@ export async function processRequest(request, reply) {
                 'via': randomVia(),
             },
             timeout: 10000,
-            follow: 5, // max redirects
-            compress: true,
+            maxRedirections: 4
         });
 
-        if (!response.ok) {
-            return handleRedirect(request, reply);
-        }
-
-        const buffer = await response.buffer();
-
-        copyHdrs(response, reply);
-        reply.header('content-encoding', 'identity');
-        request.params.originType = response.headers.get('content-type') || '';
-        request.params.originSize = buffer.length;
-
-        if (checkCompression(request)) {
-            return applyCompression(request, reply, buffer);
-        } else {
-            return performBypass(request, reply, buffer);
-        }
+        return _onRequestResponse(origin, request, reply);
     } catch (err) {
-        return handleRedirect(request, reply);
+        return _onRequestError(request, reply, err);
     }
-        }
+}
+
+function _onRequestError(request, reply, err) {
+    if (err.code === 'ERR_INVALID_URL') {
+        return reply.status(400).send('Invalid URL');
+    }
+
+    redirect(request, reply);
+    console.error(err);
+}
+
+function _onRequestResponse(origin, request, reply) {
+    if (origin.statusCode >= 400 || (origin.statusCode >= 300 && origin.headers.location)) {
+        return redirect(request, reply);
+    }
+
+    copyHeaders(origin, reply);
+    reply.header('content-encoding', 'identity');
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    reply.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
+
+    request.params.originType = origin.headers['content-type'] || '';
+    request.params.originSize = parseInt(origin.headers['content-length'] || '0', 10);
+
+    origin.body.on('error', () => request.socket.destroy());
+
+    if (shouldCompress(request)) {
+        return compressImg(request, reply, origin.body);
+    } else {
+        reply.header('x-proxy-bypass', 1);
+
+        ['accept-ranges', 'content-type', 'content-length', 'content-range'].forEach(headerName => {
+            if (headerName in origin.headers) {
+                reply.header(headerName, origin.headers[headerName]);
+            }
+        });
+
+        return origin.body.pipe(reply.raw);
+    }
+}
