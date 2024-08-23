@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 'use strict';
 
-process.env.NO_ANIMATE = 'true';  // Set this before importing other modules
-
 import fastify from 'fastify';
 import { processRequest } from './src/proxy.js'; // Import the named export
 
