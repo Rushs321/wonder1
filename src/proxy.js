@@ -1,83 +1,82 @@
-import fetch from 'node-fetch';
-import lodash from 'lodash'; // Import lodash as the default import
-import { generateRandomIP, randomUserAgent } from './utils.js';
-import { copyHeaders as copyHdrs } from './copyHeaders.js';
-import { compressImg as applyCompression } from './compress.js';
-import { bypass as performBypass } from './bypass.js';
-import { redirect as handleRedirect } from './redirect.js';
-import { shouldCompress as checkCompression } from './shouldCompress.js';
+import { request } from 'undici';
+import { pick } from 'lodash-es';
+import { copyHeaders } from './copyHeaders.js';
+import { compressImg } from './compress.js';
+import { redirect } from './redirect.js';
+import { shouldCompress } from './shouldCompress.js';
 
-const viaHeaders = [
-    '1.1 example-proxy-service.com (ExampleProxy/1.0)',
-    '1.0 another-proxy.net (Proxy/2.0)',
-    '1.1 different-proxy-system.org (DifferentProxy/3.1)',
-    '1.1 some-proxy.com (GenericProxy/4.0)',
-];
+async function proxy(request, reply) {
+  // Avoid loopback that could cause server hang.
+  if (
+    request.headers["via"] === "1.1 bandwidth-hero" &&
+    ["127.0.0.1", "::1"].includes(request.headers["x-forwarded-for"] || request.ip)
+  ) {
+    return redirect(request, reply);
+  }
 
-function randomVia() {
-    const index = Math.floor(Math.random() * viaHeaders.length);
-    return viaHeaders[index];
+  try {
+    const origin = await request(request.params.url, {
+      headers: {
+        ...pick(request.headers, ["cookie", "dnt", "referer", "range"]),
+        "user-agent": "Bandwidth-Hero Compressor",
+        "x-forwarded-for": request.headers["x-forwarded-for"] || request.ip,
+        via: "1.1 bandwidth-hero",
+      },
+      maxRedirections: 4,
+    });
+
+    _onRequestResponse(origin, request, reply);
+  } catch (err) {
+    _onRequestError(request, reply, err);
+  }
 }
 
-export async function processRequest(request, reply) {
-    const { url, jpeg, bw, l } = request.query;
+function _onRequestError(request, reply, err) {
+  // Ignore invalid URL.
+  if (err.code === "ERR_INVALID_URL") {
+    return reply.status(400).send("Invalid URL");
+  }
 
-    if (!url) {
-        const ipAddress = generateRandomIP();
-        const ua = randomUserAgent();
-        const hdrs = {
-            ...lodash.pick(request.headers, ['cookie', 'dnt', 'referer']),
-            'x-forwarded-for': ipAddress,
-            'user-agent': ua,
-            'via': randomVia(),
-        };
-
-        Object.entries(hdrs).forEach(([key, value]) => reply.header(key, value));
-        
-        return reply.send(`1we23`);
-    }
-
-    const urlList = Array.isArray(url) ? url.join('&url=') : url;
-    const cleanUrl = urlList.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, 'http://');
-
-    request.params.url = cleanUrl;
-    request.params.webp = !jpeg;
-    request.params.grayscale = bw !== '0';
-    request.params.quality = parseInt(l, 10) || 40;
-
-    const randomIP = generateRandomIP();
-    const userAgent = randomUserAgent();
-
-    try {
-        const response = await fetch(request.params.url, {
-            headers: {
-                ...lodash.pick(request.headers, ['cookie', 'dnt', 'referer']),
-                'user-agent': userAgent,
-                'x-forwarded-for': randomIP,
-                'via': randomVia(),
-            },
-            timeout: 10000,
-            follow: 5, // max redirects
-            compress: true,
-        });
-
-        if (!response.ok) {
-            return handleRedirect(request, reply);
-        }
-
-        const buffer = await response.buffer();
-
-        copyHdrs(response, reply);
-        reply.header('content-encoding', 'identity');
-        request.params.originType = response.headers.get('content-type') || '';
-        request.params.originSize = buffer.length;
-
-        if (checkCompression(request)) {
-            return applyCompression(request, reply, buffer);
-        } else {
-            return performBypass(request, reply, buffer);
-        }
-    } catch (err) {
-        return handleRedirect(request, reply);
-    }
+  // Redirect and log the error.
+  redirect(request, reply);
+  console.error(err);
 }
+
+function _onRequestResponse(origin, request, reply) {
+  if (origin.statusCode >= 400) {
+    return redirect(request, reply);
+  }
+
+  // Handle redirects
+  if (origin.statusCode >= 300 && origin.headers.location) {
+    return redirect(request, reply);
+  }
+
+  copyHeaders(origin, reply);
+  reply.header("content-encoding", "identity");
+  reply.header("Access-Control-Allow-Origin", "*");
+  reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+  reply.header("Cross-Origin-Embedder-Policy", "unsafe-none");
+  request.params.originType = origin.headers["content-type"] || "";
+  request.params.originSize = origin.headers["content-length"] || "0";
+
+  origin.body.on('error', _ => request.socket.destroy());
+
+  if (shouldCompress(request)) {
+    // Compress the stream using sharp and pipe it to the response.
+    return compressImg(request, reply, origin.body);
+  } else {
+    // Bypass compression and pipe the original response to the client.
+    reply.header("x-proxy-bypass", 1);
+
+    for (const headerName of ["accept-ranges", "content-type", "content-length", "content-range"]) {
+      if (headerName in origin.headers) {
+        reply.header(headerName, origin.headers[headerName]);
+      }
+    }
+
+    return origin.body.pipe(reply.raw);
+  }
+}
+
+export { proxy };
