@@ -1,33 +1,32 @@
 import sharp from 'sharp';
 import { redirect } from './redirect.js';
 
-export async function compressImg(request, reply, imgData) {
-    const { webp, grayscale, quality, originSize } = request.params;
-    const imgFormat = webp ? 'webp' : 'jpeg';
+const sharpStream = () => sharp({ animated: !process.env.NO_ANIMATE, unlimited: true });
 
-    try {
-        // Create the sharp instance and start the pipeline
-        let sharpInstance = sharp(imgData)
-            .grayscale(grayscale) // Apply grayscale conditionally
-            .toFormat(imgFormat, {
-                quality, // Use the provided quality
-                progressive: true,
-                optimizeScans: webp, // Optimize scans only for WebP
-                chromaSubsampling: webp ? '4:4:4' : '4:2:0', // Conditional chroma subsampling
-            });
+export async function compressImg(request, reply, input) {
+  const format = request.params.webp ? 'webp' : 'jpeg';
 
-        // Convert to buffer and get info
-        const { data, info } = await sharpInstance.toBuffer({ resolveWithObject: true });
+  input.pipe(
+    sharpStream()
+      .grayscale(request.params.grayscale)
+      .toFormat(format, {
+        quality: request.params.quality,
+        progressive: true,
+        optimizeScans: true,
+      })
+      .toBuffer((err, output, info) => _sendResponse(err, output, info, format, request, reply))
+  );
+}
 
-        // Send response with appropriate headers
-        reply
-            .header('content-type', `image/${imgFormat}`)
-            .header('content-length', info.size)
-            .header('x-original-size', originSize)
-            .header('x-bytes-saved', originSize - info.size)
-            .code(200)
-            .send(data);
-    } catch (error) {
-        return redirect(request, reply);
-    }
+function _sendResponse(err, output, info, format, request, reply) {
+  if (err || !info) {
+    return redirect(request, reply);
+  }
+
+  reply.header('content-type', 'image/' + format);
+  reply.header('content-length', info.size);
+  reply.header('x-original-size', request.params.originSize);
+  reply.header('x-bytes-saved', request.params.originSize - info.size);
+  
+  reply.status(200).send(output);
 }
