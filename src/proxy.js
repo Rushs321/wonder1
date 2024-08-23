@@ -1,8 +1,8 @@
-import undici from 'undici';
+import fetch from 'node-fetch';
 import lodash from 'lodash'; // Import lodash as the default import
 import { generateRandomIP, randomUserAgent } from './utils.js';
 import { copyHeaders as copyHdrs } from './copyHeaders.js';
-import { compress as applyCompression } from './compress.js';
+import { compressImg as applyCompression } from './compress.js';
 import { bypass as performBypass } from './bypass.js';
 import { redirect as handleRedirect } from './redirect.js';
 import { shouldCompress as checkCompression } from './shouldCompress.js';
@@ -49,7 +49,7 @@ export async function processRequest(request, reply) {
     const userAgent = randomUserAgent();
 
     try {
-        const response = await undici.request(request.params.url, {
+        const response = await fetch(request.params.url, {
             headers: {
                 ...lodash.pick(request.headers, ['cookie', 'dnt', 'referer']),
                 'user-agent': userAgent,
@@ -57,7 +57,8 @@ export async function processRequest(request, reply) {
                 'via': randomVia(),
             },
             timeout: 10000,
-            maxRedirections: 4
+            follow: 5, // max redirects
+            compress: true,
         });
 
         if (!response.ok) {
@@ -79,4 +80,4 @@ export async function processRequest(request, reply) {
     } catch (err) {
         return handleRedirect(request, reply);
     }
-}
+        }
