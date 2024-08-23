@@ -49,10 +49,9 @@ export async function processRequest(request, reply) {
     const randomIP = generateRandomIP();
     const userAgent = randomUserAgent();
 
-    /*if (request.headers['via'] === '1.1 bandwidth-hero' &&
-        ['127.0.0.1', '::1'].includes(request.headers['x-forwarded-for'] || request.ip)) {
-        return redirect(request, reply);
-    }*/
+    /*if (['127.0.0.1', '::1'].includes(request.headers['x-forwarded-for'])) {
+    return redirect(request, reply);
+}*/
 
     try {
         const origin = await undici.request(request.params.url, {
