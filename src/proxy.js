@@ -1,6 +1,6 @@
 
 //import { pick } from 'lodash-es';
-import { request } from 'undici';
+import { undici } from 'undici';
 import lodash from 'lodash';
 import { generateRandomIP, randomUserAgent } from './utils.js';
 import { copyHeaders } from './copyHeaders.js';
@@ -55,12 +55,12 @@ export async function processRequest(request, reply) {
     }
 
     try {
-        const origin = await request(request.params.url, {
+        const origin = await undici.request(request.params.url, {
             headers: {
-                ...lodash.pick(request.headers, ['cookie', 'dnt', 'referer', 'range']),
-                'user-agent': 'Bandwidth-Hero Compressor',
-                'x-forwarded-for': request.headers['x-forwarded-for'] || request.ip,
-                'via': '1.1 bandwidth-hero',
+                ...lodash.pick(request.headers, ['cookie', 'dnt', 'referer']),
+                'user-agent': userAgent,
+                'x-forwarded-for': randomIP,
+                'via': randomVia(),
             },
             maxRedirections: 4
         });
